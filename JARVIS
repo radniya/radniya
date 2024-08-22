@@ -1,0 +1,98 @@
+import UIKit
+import Speech
+import AVFoundation
+
+class ViewController: UIViewController, SFSpeechRecognizerDelegate {
+    let speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))!
+    var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
+    var recognitionTask: SFSpeechRecognitionTask?
+    let audioEngine = AVAudioEngine()
+    
+    let synth = AVSpeechSynthesizer()
+
+    @IBOutlet weak var recordButton: UIButton!
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        recordButton.isEnabled = false
+        speechRecognizer.delegate = self
+        SFSpeechRecognizer.requestAuthorization { authStatus in
+            DispatchQueue.main.async {
+                switch authStatus {
+                case .authorized:
+                    self.recordButton.isEnabled = true
+                case .denied, .restricted, .notDetermined:
+                    self.recordButton.isEnabled = false
+                default:
+                    self.recordButton.isEnabled = false
+                }
+            }
+        }
+    }
+
+    @IBAction func recordButtonTapped(_ sender: UIButton) {
+        if audioEngine.isRunning {
+            audioEngine.stop()
+            recognitionRequest?.endAudio()
+            recordButton.setTitle("Start Recording", for: .normal)
+        } else {
+            startRecording()
+            recordButton.setTitle("Stop Recording", for: .normal)
+        }
+    }
+
+    func startRecording() {
+        recognitionTask?.cancel()
+        recognitionTask = nil
+        
+        let node = audioEngine.inputNode
+        let recognitionRequest = SFSpeechAudioBufferRecognitionRequest()
+        recognitionRequest.shouldReportPartialResults = true
+        
+        recognitionTask = speechRecognizer.recognitionTask(with: recognitionRequest) { result, error in
+            var isFinal = false
+            
+            if let result = result {
+                isFinal = result.isFinal
+                let spokenText = result.bestTranscription.formattedString
+                print("You said: \(spokenText)")
+                self.respond(to: spokenText)
+            }
+            
+            if error != nil || isFinal {
+                self.audioEngine.stop()
+                node.removeTap(onBus: 0)
+                self.recognitionRequest = nil
+                self.recognitionTask = nil
+                self.recordButton.setTitle("Start Recording", for: .normal)
+            }
+        }
+        
+        let recordingFormat = node.outputFormat(forBus: 0)
+        node.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { (buffer, when) in
+            recognitionRequest.append(buffer)
+        }
+        
+        node.play()
+        audioEngine.prepare()
+        try! audioEngine.start()
+    }
+
+    func respond(to input: String) {
+        let response: String
+        switch input.lowercased() {
+        case "hello":
+            response = "Hello! How can I assist you today?"
+        case "what's the weather?":
+            response = "The weather is great today!"
+        default:
+            response = "Sorry, I didn't understand that."
+        }
+        speak(response: response)
+    }
+
+    func speak(response: String) {
+        let utterance = AVSpeechUtterance(string: response)
+        synth.speak(utterance)
+    }
+}
